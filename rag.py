@@ -22,6 +22,7 @@ CHUNK_OVERLAP = 50        # sobreposição entre chunks (evita perda de contexto
 TOP_K = 4                 # quantos chunks recuperar por pergunta
 EMBEDDING_MODEL = "text-embedding-3-small"
 CHAT_MODEL = "gpt-4o-mini"
+EMBEDDING_BATCH_SIZE = 100
 VECTOR_STORE_PATH = Path("data/vector_store.pkl")
 
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
@@ -60,7 +61,7 @@ def split_into_chunks(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CH
     return chunks
 
 
-def generate_embeddings(chunks: list[str]) -> list[list[float]]:
+def generate_embeddings(chunks: list[str], batch_size: int = EMBEDDING_BATCH_SIZE) -> list[list[float]]:
     """
     Converte cada chunk em um vetor numérico (embedding).
 
@@ -72,11 +73,23 @@ def generate_embeddings(chunks: list[str]) -> list[list[float]]:
     ficam próximos — sem nenhuma palavra em comum.
     """
     print(f"  Gerando embeddings para {len(chunks)} chunks...")
-    response = client.embeddings.create(
-        model=EMBEDDING_MODEL,
-        input=chunks
-    )
-    return [item.embedding for item in response.data]
+
+    if not chunks:
+        raise ValueError(
+            "Nenhum chunk para gerar embeddings. O PDF pode não conter texto extraível "
+            "(ex: PDF escaneado/imagem) ou a extração falhou."
+        )
+
+    all_embeddings = []
+    for i in range(0, len(chunks), batch_size):
+        batch = chunks[i:i + batch_size]
+        response = client.embeddings.create(
+            model=EMBEDDING_MODEL,
+            input=batch
+        )
+        all_embeddings.extend(item.embedding for item in response.data)
+
+    return all_embeddings
 
 
 def build_vector_store(pdf_path: str, force_rebuild: bool = False) -> dict:
@@ -97,9 +110,20 @@ def build_vector_store(pdf_path: str, force_rebuild: bool = False) -> dict:
     text = extract_text_from_pdf(pdf_path)
     print(f"  {len(text):,} caracteres extraídos")
 
+    if not text.strip():
+        raise ValueError(
+            f"Não foi possível extrair texto de '{pdf_path}'. "
+            "O arquivo pode ser escaneado (imagem), criptografado ou incompatível com pypdf."
+        )
+
     print("  [2/3] Dividindo em chunks...")
     chunks = split_into_chunks(text)
     print(f"  {len(chunks)} chunks criados")
+
+    if not chunks:
+        raise ValueError(
+            "A divisão em chunks gerou lista vazia. Verifique o conteúdo extraído do PDF."
+        )
 
     print("  [3/3] Gerando embeddings...")
     embeddings = generate_embeddings(chunks)

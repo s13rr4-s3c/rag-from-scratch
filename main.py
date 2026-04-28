@@ -45,7 +45,11 @@ def main():
 
     # ── Ingestion ──────────────────────────────────────────────────────────────
     print("[ INGESTION ]")
-    vector_store = build_vector_store(args.pdf, force_rebuild=args.rebuild)
+    try:
+        vector_store = build_vector_store(args.pdf, force_rebuild=args.rebuild)
+    except ValueError as exc:
+        print(f"[ERRO] {exc}")
+        sys.exit(1)
     n_chunks = len(vector_store["chunks"])
     print(f"✓ {n_chunks} chunks indexados\n")
 
