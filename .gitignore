@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Dados gerados (não versionar o vector store — é grande e gerado localmente)
+data/vector_store.pkl
+data/*.pkl
+
+# PDFs de teste (podem ser grandes)
+*.pdf
+
+# Chaves e variáveis de ambiente
+.env
+*.env
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
