@@ -21,6 +21,9 @@ data/*.pkl
 .env
 *.env
 
+#prompts para o LLM
+.prompts/
+
 # IDEs
 .vscode/
 .idea/

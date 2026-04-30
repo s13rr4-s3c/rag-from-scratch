@@ -8,12 +8,12 @@ Fluxo:
 """
 
 import os
-import pickle
+import sqlite3
 from pathlib import Path
-
 import numpy as np
 from openai import OpenAI
 from pypdf import PdfReader
+import io
 
 # ─── Configuração ────────────────────────────────────────────────────────────
 
@@ -23,7 +23,7 @@ TOP_K = 4                 # quantos chunks recuperar por pergunta
 EMBEDDING_MODEL = "text-embedding-3-small"
 CHAT_MODEL = "gpt-4o-mini"
 EMBEDDING_BATCH_SIZE = 100
-VECTOR_STORE_PATH = Path("data/vector_store.pkl")
+VECTOR_STORE_PATH = Path("data/vector_store.sqlite")
 
 client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
@@ -92,25 +92,58 @@ def generate_embeddings(chunks: list[str], batch_size: int = EMBEDDING_BATCH_SIZ
     return all_embeddings
 
 
+def numpy_to_blob(arr: np.ndarray) -> bytes:
+    with io.BytesIO() as buf:
+        np.save(buf, arr)
+        return buf.getvalue()
+
+def blob_to_numpy(blob: bytes) -> np.ndarray:
+    with io.BytesIO(blob) as buf:
+        return np.load(buf, allow_pickle=False)
+
+def setup_schema(conn: sqlite3.Connection):
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS chunks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chunk_text TEXT NOT NULL,
+            embedding BLOB NOT NULL,
+            source TEXT NOT NULL
+        )
+    ''')
+    conn.commit()
+
 def build_vector_store(pdf_path: str, force_rebuild: bool = False) -> dict:
     """
     Pipeline completo de ingestion.
-    Salva o vector store em disco para não reprocessar o PDF toda vez.
+    Salva o vector store em SQLite para não reprocessar o PDF toda vez.
     """
     VECTOR_STORE_PATH.parent.mkdir(exist_ok=True)
+    conn = sqlite3.connect(str(VECTOR_STORE_PATH))
+    setup_schema(conn)
 
-    if VECTOR_STORE_PATH.exists() and not force_rebuild:
-        print("✓ Vector store já existe. Carregando do disco...")
-        with open(VECTOR_STORE_PATH, "rb") as f:
-            return pickle.load(f)
+    # Checar se já está indexado
+    cur = conn.execute("SELECT COUNT(*) FROM chunks WHERE source=?", (pdf_path,))
+    count = cur.fetchone()[0]
+    if count > 0 and not force_rebuild:
+        print("✓ Vector store já existe. Carregando do banco...")
+        cur = conn.execute("SELECT chunk_text, embedding FROM chunks WHERE source=? ORDER BY id", (pdf_path,))
+        rows = cur.fetchall()
+        chunks = [row[0] for row in rows]
+        embeddings = np.stack([blob_to_numpy(row[1]) for row in rows])
+        conn.close()
+        return {"chunks": chunks, "embeddings": embeddings, "source": pdf_path}
+
+    if force_rebuild:
+        conn.execute("DELETE FROM chunks WHERE source=?", (pdf_path,))
+        conn.commit()
 
     print(f"→ Processando PDF: {pdf_path}")
-
     print("  [1/3] Extraindo texto...")
     text = extract_text_from_pdf(pdf_path)
     print(f"  {len(text):,} caracteres extraídos")
 
     if not text.strip():
+        conn.close()
         raise ValueError(
             f"Não foi possível extrair texto de '{pdf_path}'. "
             "O arquivo pode ser escaneado (imagem), criptografado ou incompatível com pypdf."
@@ -121,6 +154,7 @@ def build_vector_store(pdf_path: str, force_rebuild: bool = False) -> dict:
     print(f"  {len(chunks)} chunks criados")
 
     if not chunks:
+        conn.close()
         raise ValueError(
             "A divisão em chunks gerou lista vazia. Verifique o conteúdo extraído do PDF."
         )
@@ -128,17 +162,17 @@ def build_vector_store(pdf_path: str, force_rebuild: bool = False) -> dict:
     print("  [3/3] Gerando embeddings...")
     embeddings = generate_embeddings(chunks)
 
-    vector_store = {
-        "chunks": chunks,
-        "embeddings": np.array(embeddings),  # matriz (n_chunks × embedding_dim)
-        "source": pdf_path,
-    }
-
-    with open(VECTOR_STORE_PATH, "wb") as f:
-        pickle.dump(vector_store, f)
-
+    # Salvar em SQLite
+    for chunk, emb in zip(chunks, embeddings):
+        emb_blob = numpy_to_blob(np.array(emb))
+        conn.execute(
+            "INSERT INTO chunks (chunk_text, embedding, source) VALUES (?, ?, ?)",
+            (chunk, emb_blob, pdf_path)
+        )
+    conn.commit()
+    conn.close()
     print(f"✓ Vector store salvo em {VECTOR_STORE_PATH}")
-    return vector_store
+    return {"chunks": chunks, "embeddings": np.array(embeddings), "source": pdf_path}
 
 
 # ─── Etapa 2: Retrieval ───────────────────────────────────────────────────────
