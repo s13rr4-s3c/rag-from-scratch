@@ -28,7 +28,7 @@ O LLM deixa de "inventar" e passa a responder com base no documento real.
 │                        INGESTION                            │
 │  PDF ──► extract_text ──► split_chunks ──► embeddings       │
 │                                                ↓            │
-│                                        vector_store.pkl     │
+│                                  vector_store.sqlite (SQLite+BLOB) │
 └─────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -120,7 +120,7 @@ pytest tests/test_rag.py -v
 | Text chunking com overlap | `split_into_chunks()` | Divide o PDF preservando contexto nas bordas |
 | Embeddings semânticos | `generate_embeddings()` | Transforma texto em vetores de 1536 dimensões |
 | Similaridade de cosseno | `cosine_similarity()` | Mede relevância semântica independente da magnitude |
-| Vector store simples | `build_vector_store()` | Persiste embeddings em disco para reutilização |
+| Vector store persistente (SQLite+BLOB) | `build_vector_store()` | Persiste embeddings e chunks em SQLite para reutilização eficiente |
 | Prompt engineering | `generate_answer()` | Instrui o LLM a usar apenas o contexto fornecido |
 
 ---
@@ -129,7 +129,7 @@ pytest tests/test_rag.py -v
 
 Esta implementação é didática. Em produção você precisaria de:
 
-- **Vector database** (Chroma, pgvector, Pinecone) no lugar do pickle
+- **Vector database** (Chroma, pgvector, Pinecone) no lugar do SQLite local para escalar a milhões de chunks
 - **Índice ANN** (HNSW) para escalar a milhões de chunks
 - **Chunking semântico** respeitando parágrafos e seções
 - **Reranker** para refinar os resultados do retrieval

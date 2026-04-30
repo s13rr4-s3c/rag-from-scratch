@@ -9,7 +9,7 @@
 │                                                             │
 │  PDF ──► extract_text ──► split_chunks ──► embeddings       │
 │                                                ↓            │
-│                                        vector_store.pkl     │
+│                                  vector_store.sqlite (SQLite+BLOB) │
 └─────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -39,9 +39,10 @@ O overlap de 50 chars garante que informações na borda entre dois chunks não 
 
 O embedding tem 1536 dimensões. A distância euclidiana seria distorcida pela magnitude dos vetores — textos mais longos geram vetores numericamente maiores. O cosseno mede apenas a direção, capturando o significado independente do tamanho.
 
-### Por que pickle para o vector store
+### Por que SQLite+BLOB para o vector store
 
-Para uma PoC, pickle é suficiente e sem dependências extras. Em produção, usaria Chroma, Pinecone, Weaviate ou pgvector — databases vetoriais que escalam para milhões de chunks e suportam índices ANN para buscas mais rápidas.
+Para eficiência local e independência de frameworks, utilizamos SQLite e armazenamos as embeddings como BLOBs numpy. Não é necessário depender de soluções externas ou de pickle; permite consultas SQL rápidas e prepara terreno para incrementos futuros (metadados, múltiplos arquivos, etc). Em produção, usaria-se Chroma, Pinecone, Weaviate ou pgvector — databases vetoriais que escalam para milhões de chunks e suportam índices ANN para buscas mais rápidas.
+
 
 ### Por que temperature 0.1 na geração
 
@@ -51,7 +52,7 @@ Temperature controla a aleatoriedade na geração. Para RAG factual queremos res
 
 | PoC | Produção |
 |-----|----------|
-| pickle para vector store | Chroma / pgvector / Pinecone |
+| SQLite+BLOB para vector store | Chroma / pgvector / Pinecone |
 | busca linear O(n) | índice HNSW O(log n) |
 | chunks por tamanho fixo | chunking semântico (por parágrafo/seção) |
 | sem cache | cache de embeddings de queries frequentes |
